@@ -1,10 +1,10 @@
 import * as path from "node:path";
 import { chromium } from "playwright";
+import { serveStatic, settlePage } from "tasteled-qa";
 import type { SiteSpec } from "../assembly/site-spec";
-import { runContentChecksForPage } from "./content-checks";
-import { serveStatic } from "./static-server";
-import { settlePage } from "./settle";
+import { runContentChecksForPage, type LinkCache } from "./content-checks";
 import { checkAssetManifest } from "./asset-check";
+import { newCheckContext } from "./browser-context";
 import type { CheckFinding, QASuiteResult } from "./types";
 import { blockers } from "./types";
 
@@ -37,19 +37,29 @@ export async function runFastGate(opts: {
   spec: SiteSpec;
   projectRoot: string;
   outDir?: string;
+  /** Routes generated from the same frozen collection input as the build. */
+  cmsPages?: { slug: string; title: string; description?: string }[];
+  /** Existing Chrome can verify local builds without downloading another browser. */
+  browserChannel?: "chrome";
 }): Promise<FastGateResult> {
   const outDir = opts.outDir ?? path.join(opts.projectRoot, "out");
   const server = await serveStatic(outDir);
-  const browser = await chromium.launch();
-  const context = await browser.newContext();
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+  let context: Awaited<ReturnType<typeof newCheckContext>> | undefined;
   const findings: CheckFinding[] = [];
+  const cache: LinkCache = new Map();
 
   try {
-    for (const [pageIndex, pageSpec] of opts.spec.pages.entries()) {
+    browser = await chromium.launch(opts.browserChannel ? { channel: opts.browserChannel } : {});
+    context = await newCheckContext(browser);
+    const pages = [...opts.spec.pages, ...(opts.cmsPages ?? []).map(p => ({ ...p, sections: [] }))];
+    for (const [pageIndex, pageSpec] of pages.entries()) {
       const url = `${server.url}${pageSpec.slug === "/" ? "/" : pageSpec.slug}`;
       const page = await context.newPage();
       try {
-        const rawHtml = await (await fetch(url)).text();
+        const response = await fetch(url);
+        if (!response.ok) findings.push({ severity: "blocker", check: "route-response", message: `Generated route returned HTTP ${response.status}.`, url });
+        const rawHtml = await response.text();
         await page.goto(url, { waitUntil: "load" });
         // Checks 1, 2 and 5 all read rendered text; a count-up caught mid-flight makes
         // check 1 report a hydration diff that is really an animation.
@@ -62,7 +72,8 @@ export async function runFastGate(opts: {
             rawHtml,
             spec: opts.spec,
             pageSpec,
-            pageIndex,
+            pageIndex: pageIndex < opts.spec.pages.length ? pageIndex : undefined,
+            cache,
           })),
         );
       } finally {
@@ -72,15 +83,14 @@ export async function runFastGate(opts: {
 
     findings.push(...(await checkAssetManifest(outDir, opts.projectRoot)));
   } finally {
-    await context.close();
-    await browser.close();
-    await server.close();
+    await Promise.allSettled([context?.close(), browser?.close(), server.close()]);
   }
 
   const result: QASuiteResult = {
     slug: opts.spec.client.name,
     target: outDir,
     ranAt: new Date().toISOString(),
+    pages: [...opts.spec.pages, ...(opts.cmsPages ?? [])].map((p) => p.slug),
     results: [{ check: "fast-gate", ok: findings.length === 0, findings }],
   };
 

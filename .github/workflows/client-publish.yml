@@ -104,6 +104,7 @@ jobs:
           PORTAL_BASE: ${{ inputs.portal_base }}
           PUBLISH_JOB_ID: ${{ inputs.job_id }}
         run: |
+          node scripts/sync-edit-layer.mjs
           npx tsx scripts/publish-client.ts \
             --slug "$SLUG" --stage "$STAGE" --publish-id "$PUBLISH_ID" \
             --portal-base "$PORTAL_BASE" --job-id "$PUBLISH_JOB_ID"

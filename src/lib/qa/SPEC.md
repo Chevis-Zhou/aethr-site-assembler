@@ -13,21 +13,30 @@ Built 2026-09-05, plan `~/.claude/plans/aethr-product-build-spine.md` Phase 3.
 
 | Module | Spec section | What it does |
 |---|---|---|
-| `content-checks.ts` | §5.1, checks 1–8 | The eight rendered-HTML checks, run per page |
-| `layout-checks.ts` | §5.2 | Layout assertions + screenshots at 390/768/1440/1920 |
-| `accessibility-checks.ts` | §4 | axe-core (every page) + Lighthouse (homepage only, see deviation) |
+| `content-checks.ts` | §5.1, checks 1–8 | Per-page content checks. Generic ones (1 server-vs-hydrated, 3 placeholders, 4 links, 5 contact identity, 7 images, 8 title/meta/h1) are `tasteled-qa`'s; spec-driven ones stay here (2 number-vs-count, 6 empty section) plus two stricter-than-public checks (`blank-alt-text`, `landmark-count`) |
+| `types.ts` | §3 | PARKED/STAGED/PASS, and the seam with `tasteled-qa`: `fromShared` (which of its warnings are blockers here) and `toShared` (for its report renderer) |
+| `browser-context.ts` | — | The check context, with the `__name` shim `tsx` needs to run `tasteled-qa`'s `page.evaluate` callbacks |
 | `asset-check.ts` | §7 | Raster-asset-in-`out/` vs optimization-manifest coverage |
 | `smoke.ts` | §2 | The 5-check post-push smoke suite against a deployed URL |
 | `image-pipeline/optimize-images.ts` | §6 | sharp + ImageOptim + SHA-256 manifest; the one copy, also run by `tasteled` and `portfolio-2026` |
 | `image-pipeline/prewarm.ts` | §6.5 | Cloudflare-cache prewarm, rewritten (not ported) — see deviation |
-| `settle.ts` | — | Brings a page to its settled state (reveals fired, counters finished) before the content and layout stages measure or photograph it |
-| `static-server.ts` | §2 | Serves `output: "export"`'s `out/` the way Cloudflare Workers Static Assets does — `next start` refuses outright on this config |
-| `report.ts` | §9 | `qa-report.html` + `qa.json` |
 | `run.ts` | §8 | Orchestrator. CLI: `npx tsx src/lib/qa/run.ts --spec <path> [--check content\|layout\|a11y\|asset\|all] [--skip-build] [--skip-assemble]` |
 | `verify-qa.ts` | §10 | The two controls, run end to end: `npx tsx src/lib/qa/verify-qa.ts` |
 
+**From `tasteled-qa` (devDependency, public MIT — ticket 032):** layout assertions + screenshots
+at 390/768/1440/1920 (§5.2), axe-core + Lighthouse (§4), settling, the static server, and the
+report (`report.html` + `report.json`). Until 2026-09-28 this repo carried its own copies; they
+had already drifted — the public package had fixed wrapped-link overlap and external 403/429
+false positives that this suite still reported. **A fix to a generic check lands in
+`tasteled-qa`, gets published, and reaches this suite by bumping the version** — never by
+patching a local copy back in. Consolidating surfaced one real defect: axe used to run before
+the page settled, so every scroll-revealed section was invisible to it; the first settled run
+caught the CTA band's eyebrow failing contrast (fixed in `cta-band.tsx`). Lighthouse
+performance is now recorded as evidence rather than an advisory finding, so a clean site can
+reach PASS instead of always stopping at STAGED.
+
 Every check module exports its individual check functions directly (e.g.
-`checkPlaceholderScan`, `checkImages`, `runAxe`) — "every check must be individually
+`checkNumberVsDomCount`, or `checkPlaceholders` and `runAxe` from `tasteled-qa`) — "every check must be individually
 runnable" is satisfied at the function level, not by a separate CLI per check.
 
 ## Controls

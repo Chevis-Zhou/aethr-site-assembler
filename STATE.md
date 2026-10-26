@@ -1,20 +1,20 @@
 ---
-updated: 2026-10-07
+updated: 2026-10-12
 status: active
 ---
 # AethrDesign Next.js base template + assembly system — state
 
 ## Where we left off
 
+**2026-10-12 — Shared native-bundle adapters committed and pushed (`b69569a`); Phase5 development acceptance DONE.** Five generic annotation modules now consume the existing integrity-locked shared package; dev/watch also sync before imports. This clears native inventory/edit/restore/upload/publish regressions in downstream clean-source CI. No client configuration, private analysis, new dependency or transport-lock change. Base102 tests/typecheck/scoped lint PASS; downstream native/legacy52 and full clean consumer779 pass/5 expected skips, lint/typecheck/agent/audit PASS. Historical single-page HTML behavior and assembled editing stay covered.
+
+**Release boundary:** production is NOT deployed by this phase. Exact external runtime/target/media/handover acceptance remains release work; Phase4 workload/CPU/memory/artifact gates stay deferred before client CMS activation. The primary checkout remains at its older local baseline with existing mixed work intact; scoped source was published from the existing isolated worktree. Do not reset or stage the primary tree wholesale.
+
 _Keep only the newest entry here. When adding one, move the previous entry to the top of [`docs/state-history.md`](docs/state-history.md) — history there, current state here._
-
-**2026-09-30 — `_headers` generator: client static exports now grade A+ on Mozilla HTTP Observatory (was D/30).** `src/lib/deploy/security-headers.ts` writes `out/_headers` after the build (HSTS, nosniff, X-Frame-Options, Referrer-Policy, COOP, and a per-page CSP: `default-src 'none'`, script-src `'self'` + the sha256 of each page's inline scripts — no `'unsafe-inline'`). `staging()` in `deploy.ts` calls it before the manifest. Verified on a throwaway Worker: A+ / 135, 12/12 tests, exactly one CSP header on every route; page hydrates under the CSP. Cloudflare quirks measured, not assumed: multiple CSP headers AND, so page rules detach the inherited one (`! Content-Security-Policy`) — except the root `/`, where detach did not work and the fallback is `/:seg` + `/:seg/*` instead of `/*`; 100 rules / 2,000 chars per line are hard-checked. Turnstile and Google Fonts origins are auto-detected. 13 unit tests. Not yet exercised on a real client site's staging deploy (Turnstile branch untested live). Committed here; the tasteled wiring is not (it sits inside tasteled's uncommitted cf-deploy.sh refactor).
-
-**Next:** run one real client staging with it; then wire tasteled (done: `pnpm security-headers` in its deploy) and the portal's `security-headers` goal metric.
 
 ## Open threads
 
-- **Shared image optimizer extended for portfolio-2026, 2026-10-07; committed, not pushed.** `src/lib/qa/image-pipeline/optimize-images.ts` is now the one copy portfolio-2026 also runs: bounded budgets, `sharpGuard`, explicit files, exclude. The Linux `jpegtran` pass now uses `-copy icc`. It was `-copy none`, which dropped the JPEG ICC profile. Next: push when Chevis approves.
+- **Fenced client publish live 2026-10-06 (`70696f9`).** `client-publish.yml` requires the portal's `job_id`, builds, gates and uploads a deterministic artifact (`src/lib/deploy/artifact-pack.ts`) and cannot deploy; `CLOUDFLARE_*` secrets were deleted from this repo — do not add them back. `scripts/deploy-artifact.ts` is the switch the portal's `site-deploy.yml` runs. Remaining owner steps: `aethr-portal/src/lib/deploy-coordinator/README.md` → *Status*.
 
 - **Turnstile is now enabled in pairs, and the pairing is the whole rule.**
   `NEXT_PUBLIC_TURNSTILE_SITE_KEY` is a BUILD input inlined into the static export;

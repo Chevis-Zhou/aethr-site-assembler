@@ -20,6 +20,8 @@ import { listWorkerDomains } from "../src/lib/deploy/cloudflare-api";
 import { assertRoutesAttached } from "../src/lib/deploy/deploy";
 import { packArtifact } from "../src/lib/deploy/artifact-pack";
 import type { CheckFinding } from "../src/lib/qa/types";
+import { writeHeadersFile } from "../src/lib/deploy/security-headers";
+import { cmsBuildEnvironment, deriveCmsBuildAssets, fetchCmsBuildAssets, isolatedCmsBuild, prepareCmsPublish, verifyCmsAssetBytes, writeCmsAssetManifest, type PreparedCmsPublish } from "./lib/cms-publish";
 
 /**
  * The shared cloud builder — ticket 012 §3, the publish path behind the client's one
@@ -67,6 +69,11 @@ const buildPayload = z.object({
   domain: z.string().optional(),
   /** Fenced claims only: the lease this run holds. */
   attempt: z.number().int().optional(),
+  jobId: z.string().optional(),
+  slug: z.string().optional(),
+  stage: z.enum(["staging","production"]).optional(),
+  vector: z.unknown().optional(),
+  cms: z.unknown().optional(),
   /** Client uploads living in R2, fetched into `public/` before the build. */
   assets: z
     .array(z.object({ path: z.string(), url: z.string() }))
@@ -112,14 +119,15 @@ function parseArgs(argv: string[]): Args {
     throw new Error(`--stage must be "staging" or "production", got "${stage}"`);
   }
 
+  const jobId = (flags["job-id"] as string) || process.env.PUBLISH_JOB_ID || undefined;
   return {
     slug: need("slug", "PUBLISH_SLUG"),
     stage,
-    publishId: need("publish-id", "PUBLISH_ID"),
+    publishId: jobId ? (flags["publish-id"] as string) || process.env.PUBLISH_ID || "" : need("publish-id", "PUBLISH_ID"),
     portalBase: (flags["portal-base"] as string) ?? process.env.PORTAL_BASE ?? "https://portal.aethrdesign.com",
     buildSecret: need("build-secret", "PORTAL_BUILD_SECRET"),
     dryRun: flags["dry-run"] === true,
-    jobId: (flags["job-id"] as string) || process.env.PUBLISH_JOB_ID || undefined,
+    jobId,
     runner: process.env.GITHUB_RUN_ID
       ? `gha-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT ?? "1"}`
       : `local-${os.hostname()}-${process.pid}`,
@@ -135,6 +143,8 @@ async function fetchPayload(args: Args): Promise<BuildPayload> {
     throw new Error(`Portal returned ${res.status} fetching the build payload: ${await res.text()}`);
   }
   const payload = buildPayload.parse(await res.json());
+  if (payload.cms && (!args.jobId || payload.jobId !== args.jobId || payload.slug !== args.slug || payload.stage !== args.stage))
+    throw new Error("CMS payload does not match this fenced build job");
   const spec = z.safeParse(siteSpecSchema, payload.spec);
   if (!spec.success) {
     // The portal validates on every write, so this is a corrupt row rather than a bad
@@ -145,13 +155,16 @@ async function fetchPayload(args: Args): Promise<BuildPayload> {
 }
 
 /** Client uploads land in `public/` under the same relative path the spec references. */
-async function fetchAssets(assets: { path: string; url: string }[]): Promise<void> {
+async function fetchAssets(assets: { path: string; url: string }[],args:Args,projectRoot = PROJECT_ROOT): Promise<void> {
   for (const asset of assets) {
-    const target = path.join(PROJECT_ROOT, "public", asset.path.replace(/^\/+/, ""));
-    if (!target.startsWith(path.join(PROJECT_ROOT, "public"))) {
+    const target = path.resolve(projectRoot, "public", asset.path.replace(/^\/+/, ""));
+    if (!target.startsWith(path.join(projectRoot, "public") + path.sep)) {
       throw new Error(`Asset path escapes public/: ${asset.path}`);
     }
-    const res = await fetch(asset.url);
+    const url = new URL(asset.url),portal = new URL(args.portalBase);
+    if (url.origin !== portal.origin || url.username || url.password || url.pathname !== "/api/edit/asset" || url.searchParams.get("slug") !== args.slug)
+      throw new Error("Site asset address does not belong to this Portal build");
+    const res = await fetch(url,{headers:{Authorization:`Bearer ${args.buildSecret}`},redirect:"error"});
     if (!res.ok) throw new Error(`Could not fetch asset ${asset.path}: ${res.status}`);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, Buffer.from(await res.arrayBuffer()));
@@ -173,9 +186,9 @@ function sourceCommit(args: Args): string {
 }
 
 /** Fenced: hand the gated build to the portal. Nothing here can make it live. */
-async function uploadArtifact(args: Args, attempt: number): Promise<void> {
-  const artifact = packArtifact(path.join(PROJECT_ROOT, "out"));
-  const commit = sourceCommit(args);
+async function uploadArtifact(args: Args, attempt: number,projectRoot = PROJECT_ROOT,pinnedCommit?:string): Promise<void> {
+  const artifact = packArtifact(path.join(projectRoot, "out"));
+  const commit = pinnedCommit ?? sourceCommit(args);
   console.log(`  artifact ${artifact.hash} (${artifact.files} files, ${artifact.bytes.length} bytes) at ${commit}`);
   if (args.dryRun) {
     console.log("  [dry-run] would upload the artifact to /api/deploy/artifact");
@@ -240,21 +253,31 @@ async function main(): Promise<void> {
   console.log(`PUBLISH ${args.slug} (${args.stage}) — publish ${args.publishId}${args.jobId ? ` — fenced job ${args.jobId} as ${args.runner}` : ""}`);
   const payload = await fetchPayload(args);
   if (args.jobId && payload.attempt === undefined) throw new Error("Portal did not grant a build lease");
-
+  let projectRoot = PROJECT_ROOT;
+  let cms:PreparedCmsPublish | undefined;
   try {
-    const specPath = path.join(PROJECT_ROOT, "spec.json");
+    if (payload.cms) {
+      cms = await prepareCmsPublish(payload.cms,payload.spec,PROJECT_ROOT,payload.vector);
+      const vector = payload.vector as {site?:{version?:unknown}};
+      if (vector.site?.version !== payload.version) throw new Error("Frozen Site version does not match this CMS build");
+      projectRoot = isolatedCmsBuild(cms);
+    }
+    const specPath = path.join(projectRoot, "spec.json");
     fs.writeFileSync(specPath, JSON.stringify(payload.spec, null, 2) + "\n", "utf-8");
-
-    console.log("  assembling…");
-    await assembleFromSpec(specPath, PROJECT_ROOT);
 
     if (payload.assets.length > 0) {
       console.log(`  fetching ${payload.assets.length} client asset(s)…`);
-      await fetchAssets(payload.assets);
+      await fetchAssets(payload.assets,args,projectRoot);
     }
+    if (cms) await fetchCmsBuildAssets(projectRoot,cms.assets,{jobId:args.jobId!,runner:args.runner,attempt:payload.attempt!,portalBase:args.portalBase,buildSecret:args.buildSecret});
+    const derived = cms ? await deriveCmsBuildAssets(projectRoot,cms) : undefined;
+
+    console.log("  assembling…");
+    const assembled = await assembleFromSpec(specPath, projectRoot,cms ? {cms:cms.input} : {});
 
     console.log("  optimizing images…");
-    const optimized = await optimizeImages(PROJECT_ROOT, path.join(PROJECT_ROOT, "public"));
+    const optimized = await optimizeImages(projectRoot, path.join(projectRoot, "public"));
+    if (derived) verifyCmsAssetBytes(projectRoot,derived.assets);
     console.log(
       `  ${optimized.processed} processed, ${optimized.skipped} already optimized, manifest ${optimized.manifestEntries}`,
     );
@@ -264,10 +287,12 @@ async function main(): Promise<void> {
     // script and fails the whole publish over an unrelated ignored build script. This is
     // also the exact command `deploy/deploy.ts` runs on the Mac, which is the point —
     // §3's first reason for one shared builder is that the two paths cannot diverge.
-    execFileSync("npx", ["next", "build"], { cwd: PROJECT_ROOT, stdio: "inherit" });
+    execFileSync("npx", ["next", "build"], { cwd: projectRoot, stdio: "inherit",...(cms ? {env:cmsBuildEnvironment(cms.buildEnv)} : {}) });
+    if (derived) writeCmsAssetManifest(path.join(projectRoot,"out"),derived.manifest);
+    writeHeadersFile(path.join(projectRoot,"out"), cms ? {previewFrames:[{route:"/cms-preview",editorOrigin:cms.input.editorOrigin}]} : {});
 
     console.log("  fast gate…");
-    const gate = await runFastGate({ spec: payload.spec, projectRoot: PROJECT_ROOT });
+    const gate = await runFastGate({ spec: payload.spec, projectRoot,cmsPages:assembled.cmsPages });
     if (!gate.passed) {
       console.error(`  GATE FAILED — ${gate.findings.length} blocker(s). Nothing uploaded.`);
       for (const finding of gate.findings) console.error(`    ${finding.check}: ${finding.message}`);
@@ -278,7 +303,7 @@ async function main(): Promise<void> {
     console.log("  gate passed.");
 
     if (args.jobId) {
-      await uploadArtifact(args, payload.attempt!);
+      await uploadArtifact(args, payload.attempt!,projectRoot,cms?.sourceCommit);
       return;
     }
 
@@ -322,6 +347,8 @@ async function main(): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
     await report(args, { status: "failed", version: payload.version, attempt: payload.attempt, error: message });
     throw err;
+  } finally {
+    if (projectRoot !== PROJECT_ROOT) fs.rmSync(projectRoot,{recursive:true,force:true});
   }
 }
 

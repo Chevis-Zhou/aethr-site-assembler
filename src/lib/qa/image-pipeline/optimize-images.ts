@@ -51,6 +51,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import sharp from "sharp";
+export { sharp };
 
 const execFileAsync = promisify(execFile);
 

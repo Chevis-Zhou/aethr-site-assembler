@@ -5,22 +5,20 @@ import { chromium } from "playwright";
 import { z } from "zod/v4";
 import { assembleFromSpec } from "../assembly/assemble";
 import { siteSpecSchema, type SiteSpec } from "../assembly/site-spec";
-import { serveStatic } from "./static-server";
-import { settlePage } from "./settle";
-import { runContentChecksForPage } from "./content-checks";
-import { runLayoutChecksForPage } from "./layout-checks";
-import { runLighthouse, runAxe } from "./accessibility-checks";
+import { runAxe, runLayoutChecksForPage, runLighthouse, serveStatic, settlePage, writeReport } from "tasteled-qa";
+import { runContentChecksForPage, type LinkCache } from "./content-checks";
 import { checkAssetManifest } from "./asset-check";
-import { writeQaReport } from "./report";
+import { newCheckContext } from "./browser-context";
 import type { CheckResult, QASuiteResult } from "./types";
-import { verdictOf, blockers } from "./types";
+import { fromShared, toShared, verdictOf, blockers } from "./types";
 
 /**
  * The full suite orchestrator, `qa-specification.md` §8's "full suite" row: content checks
  * + layout assertions + accessibility floor + asset check, run against a local production
- * build. Each stage is also exported standalone (content-checks.ts, layout-checks.ts,
- * accessibility-checks.ts, asset-check.ts) so a failure names itself without re-running
- * the whole thing — the phase's "every check must be individually runnable" requirement.
+ * build. Layout, accessibility, settling, serving and the report are `tasteled-qa`'s; this
+ * file owns what is pipeline-specific — assembling from a spec, the spec's page list, the
+ * asset check, and the PARKED/STAGED/PASS verdict. Each check is exported standalone
+ * (here or from `tasteled-qa`) so a failure names itself without re-running the whole thing.
  */
 
 export type CheckName = "content" | "layout" | "a11y" | "asset" | "all";
@@ -100,9 +98,9 @@ export async function runFullSuite(opts: RunOptions): Promise<QASuiteResult> {
   // (which drives it over raw CDP, not through Playwright) can share it.
   const cdpPort = 9222 + Math.floor(Math.random() * 1000);
   const browser = await chromium.launch({ args: [`--remote-debugging-port=${cdpPort}`] });
-  // A shared, ordinary context — `browser.newPage()`'s single-owner context rejects the
-  // extra blank page axe-core opens internally to finish a run ("Please use browser.newContext()").
-  const context = await browser.newContext();
+  const context = await newCheckContext(browser);
+  const cache: LinkCache = new Map();
+  const lighthouse: Record<string, unknown> = {};
 
   try {
     // -- content checks (check 1-8), one page context per spec page --
@@ -126,6 +124,7 @@ export async function runFullSuite(opts: RunOptions): Promise<QASuiteResult> {
             spec,
             pageSpec,
             pageIndex,
+            cache,
           });
           contentFindings.push(...findings);
         } finally {
@@ -146,10 +145,10 @@ export async function runFullSuite(opts: RunOptions): Promise<QASuiteResult> {
           const { findings, screenshots } = await runLayoutChecksForPage({
             page,
             url,
-            slug: pageSpec.slug,
+            pathname: pageSpec.slug,
             screenshotDir,
           });
-          layoutFindings.push(...findings);
+          layoutFindings.push(...fromShared(findings));
           allScreenshots.push(...screenshots);
         } finally {
           await page.close();
@@ -171,7 +170,8 @@ export async function runFullSuite(opts: RunOptions): Promise<QASuiteResult> {
         const page = await context.newPage();
         try {
           await page.goto(url, { waitUntil: "load" });
-          a11yFindings.push(...(await runAxe(page, url)));
+          await settlePage(page);
+          a11yFindings.push(...fromShared(await runAxe(page, url)));
         } finally {
           await page.close();
         }
@@ -179,13 +179,17 @@ export async function runFullSuite(opts: RunOptions): Promise<QASuiteResult> {
       const lighthousePages = opts.lighthousePages ?? ["/"];
       for (const slug of lighthousePages) {
         const url = `${server.url}${slug === "/" ? "/" : slug}`;
-        const { findings } = await runLighthouse(url, cdpPort);
-        a11yFindings.push(...findings);
+        // Performance is recorded as evidence and gates nothing (owner ruling, §6). It used to
+        // be an always-on advisory, which meant no site could ever reach PASS.
+        const { findings, scores } = await runLighthouse(url, cdpPort);
+        lighthouse[slug] = scores;
+        a11yFindings.push(...fromShared(findings));
       }
       results.push({
         check: "accessibility-floor",
         ok: a11yFindings.filter((f) => f.severity === "blocker").length === 0,
         findings: a11yFindings,
+        evidence: Object.keys(lighthouse).length ? { lighthouse } : undefined,
       });
     }
   } finally {
@@ -204,10 +208,11 @@ export async function runFullSuite(opts: RunOptions): Promise<QASuiteResult> {
     slug: spec.client.name,
     target: `${opts.projectRoot}/out (local production build)`,
     ranAt: new Date().toISOString(),
+    pages: spec.pages.map((p) => p.slug),
     results,
   };
 
-  writeQaReport(result, allScreenshots, opts.outDir);
+  writeReport(toShared(result), allScreenshots, opts.outDir);
 
   // After the report, not before: `out/` is already built and served, so putting the
   // sources back cannot change a single finding — it only stops the run leaving a diff.
@@ -248,7 +253,7 @@ if (process.argv[1]?.replace(/\\/g, "/").includes("qa/run")) {
       const verdict = verdictOf(result);
       const blockerCount = blockers(result).length;
       console.log(`\n${verdict}${blockerCount ? ` — ${blockerCount} blocker(s)` : ""}`);
-      console.log(`Report: ${path.join(opts.outDir, "qa-report.html")}`);
+      console.log(`Report: ${path.join(opts.outDir, "report.html")}`);
       process.exit(verdict === "PARKED" ? 1 : 0);
     })
     .catch((err: unknown) => {

@@ -104,6 +104,37 @@ describe("routeFor", () => {
 });
 
 describe("generateHeadersFile", () => {
+  it("allows only the recorded editor to frame the exact preview shell", () => {
+    const dir = site({"index.html":"<p>home</p>","cms-preview.html":"<script>preview()</script>","404.html":"<p>missing</p>"});
+    const rules = Object.fromEntries(generateHeadersFile(dir,{previewFrames:[{route:"/cms-preview",editorOrigin:"https://portal.example"}]}).trim().split("\n\n").map(rule=>[rule.split("\n")[0],rule]));
+    assert.match(rules["/*"], /X-Frame-Options: DENY/);
+    assert.match(rules["/cms-preview"], /! X-Frame-Options/);
+    assert.match(rules["/cms-preview"], /frame-ancestors https:\/\/portal\.example(?:;|$)/);
+    assert.match(rules["/cms-preview"], /img-src 'self' data: blob: https:/);
+    for (const route of ["/", "/:seg", "/:seg/*"]) {
+      assert.match(rules[route], /frame-ancestors 'none'/);
+      assert.ok(!rules[route].includes("! X-Frame-Options"));
+    }
+  });
+
+  it("refuses framing exceptions for production, nonexistent, duplicate or nonexact origins", () => {
+    const dir = site({"index.html":"<p/>","about.html":"<p/>","cms-preview/index.html":"<p/>"});
+    const valid = {route:"/cms-preview/",editorOrigin:"http://localhost:3000"};
+    assert.doesNotThrow(()=>generateHeadersFile(dir,{previewFrames:[valid]}));
+    for (const preview of [{...valid,route:"/about"},{...valid,route:"/cms-preview"},{...valid,editorOrigin:"https://portal.example/path"},{...valid,editorOrigin:"http://portal.example"},{...valid,editorOrigin:"https://portal.example; frame-ancestors *"}])
+      assert.throws(()=>generateHeadersFile(dir,{previewFrames:[preview]}));
+    assert.throws(()=>generateHeadersFile(dir,{previewFrames:[valid,valid]}),/unique exported/);
+  });
+
+  it("supports an exact exported preview under a registered renderer prefix", () => {
+    const dir = site({"html-proof/cms-preview/index.html":"<p/>","html-proof/index.html":"<p/>"});
+    const headers = generateHeadersFile(dir,{previewFrames:[{route:"/html-proof/cms-preview/",editorOrigin:"https://portal.example"}]});
+    const blocks = Object.fromEntries(headers.trim().split("\n\n").map(rule=>[rule.split("\n")[0],rule]));
+    assert.match(blocks["/html-proof/cms-preview/"], /frame-ancestors https:\/\/portal\.example/);
+    assert.match(blocks["/html-proof/"], /frame-ancestors 'none'/);
+    assert.throws(()=>generateHeadersFile(dir,{previewFrames:[{route:"/html-proof/*/cms-preview/",editorOrigin:"https://portal.example"}]}));
+  });
+
   it("emits static headers, a 404-CSP fallback and one rule per page, 404 excluded", () => {
     const dir = site({
       "index.html": "<script>home()</script>",

@@ -55,7 +55,7 @@ export function CTABandSection({
       >
         {eyebrow && (
           <p
-            className="mb-3 text-sm font-semibold tracking-wide uppercase opacity-80"
+            className="mb-3 text-sm font-semibold tracking-wide uppercase"
             {...mark(edit, "eyebrow")}
           >
             {eyebrow}

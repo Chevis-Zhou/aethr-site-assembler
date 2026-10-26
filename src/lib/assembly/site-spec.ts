@@ -62,6 +62,7 @@ export const siteSpecSchema = z
     pages: z.array(pageSchema),
     seo: seoSchema,
     nav: z.array(navItemSchema).optional(),
+    collections: z.array(z.object({ binding: z.string() }).strict()).optional(),
   })
   .check(
     (ctx) => {

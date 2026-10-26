@@ -72,14 +72,16 @@ async function main() {
   console.log(`Verdict: ${negVerdict} (${negBlockers.length} blockers, ${advisories(negResult).length} advisories)`);
   for (const b of negBlockers) console.log(`  [${b.check}] ${b.message}`);
 
+  // Generic checks carry `tasteled-qa`'s ids; the rest are this pipeline's own.
   const expectedChecks = [
     "content-2-number-vs-dom-count",
-    "content-3-placeholder-scan",
-    "content-4-links-and-anchors",
-    "content-5-identity-verbatim",
+    "placeholder-text",
+    "links-and-anchors",
+    "contact-identity",
     "content-6-empty-section",
-    "content-7-images",
-    "content-8-title-meta-h1",
+    "blank-alt-text",
+    "title-meta-h1",
+    "landmark-count",
     "asset-manifest-coverage",
   ];
   const firedChecks = new Set(negBlockers.map((b) => b.check));

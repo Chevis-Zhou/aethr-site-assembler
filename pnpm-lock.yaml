@@ -68,9 +68,6 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
-      '@axe-core/playwright':
-        specifier: ^4.13.0
-        version: 4.13.0(playwright-core@1.62.1)
       '@tailwindcss/cli':
         specifier: ^4.3.3
         version: 4.3.3
@@ -92,9 +89,6 @@ importers:
       eslint-config-next:
         specifier: 16.3.8
         version: 16.3.8(@typescript-eslint/parser@8.61.0(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3))(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3)
-      lighthouse:
-        specifier: ^13.4.1
-        version: 13.4.1(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))
       playwright:
         specifier: ^1.62.1
         version: 1.62.1
@@ -107,6 +101,9 @@ importers:
       tailwindcss:
         specifier: ^4
         version: 4.3.0
+      tasteled-qa:
+        specifier: ^0.1.0
+        version: 0.1.0(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))(playwright-core@1.62.1)
       tsx:
         specifier: ^4.22.4
         version: 4.22.4
@@ -1614,10 +1611,6 @@ packages:
   available-typed-arrays@1.0.7:
     resolution: {integrity: sha512-wvUjBtSGN7+7SjNpq/9M2Tg350UZD3q62IFZLbRAR1bSMlCo1ZaeW+BJ+D090e4hIIZLBcTDWe4Mh4jvUDajzQ==}
     engines: {node: '>= 0.4'}
-
-  axe-core@4.12.1:
-    resolution: {integrity: sha512-s7iGf5GaVMxEG0ENN9x+xTr7GFZCb1ZP/1uATUpCEK2X78nDB3RwbtFCo9pGAf9ru+VwoQ464DkaLEeRM08wJA==}
-    engines: {node: '>=4'}
 
   axe-core@4.13.0:
     resolution: {integrity: sha512-UzGt8zg7Ny8djbYMhxl2zuEevVa7r2gJjYY5Lwr1xM7+XU2nd6CkIWFTVcCIbAP63vSz71NaVyyuSk9lHKcy0A==}
@@ -3556,6 +3549,11 @@ packages:
     resolution: {integrity: sha512-uxc/zpqFg6x7C8vOE7lh6Lbda8eEL9zmVm/PLeTPBRhh1xCgdWaQ+J1CUieGpIfm2HdtsUpRv+HshiasBMcc6A==}
     engines: {node: '>=6'}
 
+  tasteled-qa@0.1.0:
+    resolution: {integrity: sha512-cTpqKTnCGsvINE44135BUlwWaiJkUHI43HcsMiCEjecl5ecSAje+LEIzB8teo+S3wi6P56f5ZAWkjCvVKilTIg==}
+    engines: {node: '>=20'}
+    hasBin: true
+
   third-party-web@0.29.2:
     resolution: {integrity: sha512-fegtha91tq2DHphyoiBXVHjVi2YG9zFaRnboT9C28tO1en9Y3wJsfspuy40F+u5wl3hHVbw7cnd1b67kEGHb8g==}
 
@@ -5216,8 +5214,6 @@ snapshots:
     dependencies:
       possible-typed-array-names: 1.1.0
 
-  axe-core@4.12.1: {}
-
   axe-core@4.13.0: {}
 
   axobject-query@4.1.0: {}
@@ -6481,7 +6477,7 @@ snapshots:
     dependencies:
       '@paulirish/trace_engine': 0.0.65
       '@sentry/node': 10.73.0(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))
-      axe-core: 4.12.1
+      axe-core: 4.13.0
       chrome-launcher: 1.2.1
       configstore: 7.1.0
       csp_evaluator: 1.1.8
@@ -7387,6 +7383,21 @@ snapshots:
   tailwindcss@4.3.3: {}
 
   tapable@2.3.3: {}
+
+  tasteled-qa@0.1.0(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))(playwright-core@1.62.1):
+    dependencies:
+      '@axe-core/playwright': 4.13.0(playwright-core@1.62.1)
+      lighthouse: 13.4.1(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))
+      playwright: 1.62.1
+    transitivePeerDependencies:
+      - '@opentelemetry/core'
+      - '@opentelemetry/exporter-trace-otlp-http'
+      - bufferutil
+      - playwright-core
+      - proxy-agent
+      - supports-color
+      - utf-8-validate
+      - yauzl
 
   third-party-web@0.29.2: {}
 

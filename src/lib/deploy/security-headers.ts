@@ -48,6 +48,8 @@ export interface SecurityHeadersOptions {
   connectOrigins?: string[];
   /** Origins allowed as embedded frames, beyond anything detected. */
   frameOrigins?: string[];
+  /** Only these exported preview shells may be embedded by their registered editor. */
+  previewFrames?: Array<{ route: string; editorOrigin: string }>;
 }
 
 export interface PageAssets {
@@ -156,9 +158,10 @@ export interface PolicyInput {
   turnstile: boolean;
   connectOrigins: string[];
   frameOrigins: string[];
+  frameAncestors?: string[];
 }
 
-export function buildPolicy({ assets, turnstile, connectOrigins, frameOrigins }: PolicyInput): string {
+export function buildPolicy({ assets, turnstile, connectOrigins, frameOrigins, frameAncestors = [] }: PolicyInput): string {
   const scriptSrc = ["'self'", ...assets.scriptHashes, ...assets.scriptOrigins, CF_ANALYTICS_SCRIPT];
   const styleSrc = ["'self'", ...assets.styleHashes, ...assets.styleOrigins];
   const fontSrc = ["'self'", "data:"];
@@ -186,7 +189,7 @@ export function buildPolicy({ assets, turnstile, connectOrigins, frameOrigins }:
     ["object-src", ["'none'"]],
     ["base-uri", ["'self'"]],
     ["form-action", ["'self'", ...connectOrigins]],
-    ["frame-ancestors", ["'none'"]],
+    ["frame-ancestors", frameAncestors.length ? unique(frameAncestors) : ["'none'"]],
   ];
 
   return [...directives.map(([name, values]) => `${name} ${values.join(" ")}`), "upgrade-insecure-requests"].join("; ");
@@ -218,7 +221,18 @@ export function generateHeadersFile(outDir: string, options: SecurityHeadersOpti
   const turnstile = usesTurnstile(resolved, files);
   const connectOrigins = options.connectOrigins ?? [];
   const frameOrigins = options.frameOrigins ?? [];
-  const policyFor = (assets: PageAssets) => buildPolicy({ assets, turnstile, connectOrigins, frameOrigins });
+  const previewFrames = new Map<string, string>();
+  for (const preview of options.previewFrames ?? []) {
+    const origin = new URL(preview.editorOrigin);
+    if (origin.origin !== preview.editorOrigin || origin.username || origin.password
+      || !(origin.protocol === "https:" || origin.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname)))
+      throw new Error("Preview editorOrigin must be an exact secure origin");
+    if (!/^\/(?:[A-Za-z0-9][A-Za-z0-9_-]*\/)*(cms-preview|ae-preview)\/?$/.test(preview.route)
+      || !htmlFiles.some(file => !["404.html", "_not-found.html"].includes(file) && routeFor(file) === preview.route)
+      || previewFrames.has(preview.route)) throw new Error("Preview framing requires a unique exported preview route");
+    previewFrames.set(preview.route, preview.editorOrigin);
+  }
+  const policyFor = (assets: PageAssets, editorOrigin?: string) => buildPolicy({ assets, turnstile, connectOrigins, frameOrigins, frameAncestors: editorOrigin ? [editorOrigin] : [] });
 
   // The catch-all serves the 404 page for any unknown path, so it carries that page's hashes.
   const notFound = htmlFiles.find((f) => f === "404.html");
@@ -226,7 +240,7 @@ export function generateHeadersFile(outDir: string, options: SecurityHeadersOpti
     ? scanHtml(fs.readFileSync(path.join(resolved, notFound), "utf-8"))
     : scanHtml("");
 
-  const cspLine = (assets: PageAssets) => `  Content-Security-Policy: ${policyFor(assets)}`;
+  const cspLine = (assets: PageAssets, editorOrigin?: string) => `  Content-Security-Policy: ${policyFor(assets, editorOrigin)}`;
   const blocks: string[] = [
     ["/*", ...STATIC_HEADERS.map(([k, v]) => `  ${k}: ${v}`)].join("\n"),
     ["/:seg", cspLine(fallback)].join("\n"),
@@ -238,7 +252,8 @@ export function generateHeadersFile(outDir: string, options: SecurityHeadersOpti
     const route = routeFor(file);
     const assets = scanHtml(fs.readFileSync(path.join(resolved, file), "utf-8"));
     const detach = route === "/" ? [] : ["  ! Content-Security-Policy"];
-    blocks.push([route, ...detach, cspLine(assets)].join("\n"));
+    const editorOrigin = previewFrames.get(route);
+    blocks.push([route, ...detach, ...(editorOrigin ? ["  ! X-Frame-Options"] : []), cspLine(assets, editorOrigin)].join("\n"));
   }
 
   if (blocks.length > HEADERS_RULE_LIMIT) {
@@ -277,7 +292,7 @@ function parseArgs(argv: string[]): { outDir: string; options: SecurityHeadersOp
   return { outDir, options };
 }
 
-if (process.argv[1]?.replace(/\\/g, "/").includes("deploy/security-headers")) {
+if (/\/deploy\/security-headers\.(?:ts|js)$/.test(process.argv[1]?.replace(/\\/g, "/") ?? "")) {
   const { outDir, options } = parseArgs(process.argv.slice(2));
   const target = writeHeadersFile(outDir, options);
   const rules = fs.readFileSync(target, "utf-8").split(/\n\n/).length;

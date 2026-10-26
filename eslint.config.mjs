@@ -25,17 +25,10 @@ const eslintConfig = defineConfig([
         {
           patterns: [
             {
-              group: [
-                // Both spellings, because this repo uses relative imports as often as
-                // the alias: `src/lib/edit` is the only `edit/` directory in the tree, so
-                // matching on the segment cannot catch anything else.
-                "@/lib/edit/*",
-                "**/edit/*",
-                "!@/lib/edit/preview",
-                "!@/lib/edit/markers",
-                "!**/edit/preview",
-                "!**/edit/markers",
-              ],
+              // Negated globs cannot re-include a nested path beneath an excluded parent.
+              // Both alias and relative imports keep the backend boundary; generic CMS
+              // transport is separate and contains no edit backend.
+              regex: "(?:^|/)edit/(?!preview$|markers$|shared/(?:cms/|native-runtime\\.mjs$)).+",
               message:
                 "Import from '@/lib/edit' instead — that named export list is the contract the portal mirrors. Only 'preview' and 'markers' may be imported directly.",
             },
