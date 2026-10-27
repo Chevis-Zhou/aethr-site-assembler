@@ -1,4 +1,4 @@
-# Base Template — Assembler + Self-Edit Backend
+# Site Assembler — Assembler + Self-Edit Backend
 
 Assembler and section library for AethrDesign's productized (Assembled/Directed/Bespoke) sites,
 plus the self-edit backend every rung consumes. `aethr-portal` mirrors `src/lib/edit/` in at
