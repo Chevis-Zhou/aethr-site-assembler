@@ -52,6 +52,8 @@ export interface SecurityHeadersOptions {
   frameOrigins?: string[];
   /** Only these exported preview shells may be embedded by their registered editor. */
   previewFrames?: Array<{ route: string; editorOrigin: string }>;
+  /** Explicit static route families, after their inline assets are externalized. */
+  groups?: Array<{ prefix: string; frameAncestors?: string[]; frameOrigins?: string[]; styleOrigins?: string[]; inlineStyles?: boolean }>;
 }
 
 export interface PageAssets {
@@ -161,11 +163,12 @@ export interface PolicyInput {
   connectOrigins: string[];
   frameOrigins: string[];
   frameAncestors?: string[];
+  inlineStyles?: boolean;
 }
 
-export function buildPolicy({ assets, turnstile, connectOrigins, frameOrigins, frameAncestors = [] }: PolicyInput): string {
+export function buildPolicy({ assets, turnstile, connectOrigins, frameOrigins, frameAncestors = [], inlineStyles = false }: PolicyInput): string {
   const scriptSrc = ["'self'", ...assets.scriptHashes, ...assets.scriptOrigins, CF_ANALYTICS_SCRIPT];
-  const styleSrc = ["'self'", ...assets.styleHashes, ...assets.styleOrigins];
+  const styleSrc = ["'self'", ...assets.styleHashes, ...assets.styleOrigins, ...(inlineStyles ? ["'unsafe-inline'"] : [])];
   const fontSrc = ["'self'", "data:"];
   const connectSrc = ["'self'", ...connectOrigins, CF_ANALYTICS_BEACON];
   const frames = [...frameOrigins, ...assets.frameOrigins];
@@ -235,6 +238,17 @@ export function generateHeadersFile(outDir: string, options: SecurityHeadersOpti
     previewFrames.set(preview.route, preview.editorOrigin);
   }
   const policyFor = (assets: PageAssets, editorOrigin?: string) => buildPolicy({ assets, turnstile, connectOrigins, frameOrigins, frameAncestors: editorOrigin ? [editorOrigin] : [] });
+  const groups = options.groups ?? [];
+  if (groups.length && options.preserveHtml) throw new Error("Grouped CSP and per-page HTML cache preservation require separate export policies");
+  for (const group of groups) {
+    if (!/^\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\/$/.test(group.prefix)) throw new Error("A static policy group needs a literal non-root route prefix");
+    if (groups.some(other => other !== group && (other.prefix.startsWith(group.prefix) || group.prefix.startsWith(other.prefix)))) throw new Error("Static policy groups must not overlap");
+    for (const origin of [...(group.frameAncestors ?? []), ...(group.frameOrigins ?? []), ...(group.styleOrigins ?? [])]) {
+      if (origin === "'self'") continue;
+      const parsed = new URL(origin);
+      if (parsed.origin !== origin || parsed.username || parsed.password || parsed.protocol !== 'https:') throw new Error("Static policy origins must be exact HTTPS origins or self");
+    }
+  }
 
   // The catch-all serves the 404 page for any unknown path, so it carries that page's hashes.
   const notFound = htmlFiles.find((f) => f === "404.html");
@@ -255,10 +269,22 @@ export function generateHeadersFile(outDir: string, options: SecurityHeadersOpti
   for (const file of htmlFiles) {
     if ((file === "404.html" || file === "_not-found.html") && !options.preserveHtml) continue;
     const route = routeFor(file);
+    if (groups.some(group => route.startsWith(group.prefix))) continue;
     const assets = scanHtml(fs.readFileSync(path.join(resolved, file), "utf-8"));
     const detach = route === "/" ? [] : ["  ! Content-Security-Policy"];
     const editorOrigin = previewFrames.get(route);
     blocks.push([route, ...detach, ...(editorOrigin ? ["  ! X-Frame-Options"] : []), cspLine(assets, editorOrigin), ...htmlCache].join("\n"));
+  }
+
+  for (const group of groups) {
+    if ([...previewFrames.keys()].some(route => route.startsWith(group.prefix))) throw new Error("An editor preview route cannot share a grouped CSP");
+    const members = htmlFiles.filter(file => routeFor(file).startsWith(group.prefix));
+    if (!members.length) throw new Error(`Static policy group has no exported pages: ${group.prefix}`);
+    const scans = members.map(file => scanHtml(fs.readFileSync(path.join(resolved, file), "utf-8")));
+    if (scans.some(scan => scan.scriptHashes.length || scan.styleHashes.length)) throw new Error(`Externalize inline assets before grouping ${group.prefix}`);
+    const assets: PageAssets = {scriptHashes: [], styleHashes: [], scriptOrigins: unique(scans.flatMap(scan => scan.scriptOrigins)), styleOrigins: unique([...scans.flatMap(scan => scan.styleOrigins), ...(group.styleOrigins ?? [])]), frameOrigins: unique(scans.flatMap(scan => scan.frameOrigins))};
+    const policy = buildPolicy({assets, turnstile, connectOrigins, frameOrigins: group.frameOrigins ?? frameOrigins, frameAncestors: group.frameAncestors, inlineStyles: group.inlineStyles});
+    blocks.push([group.prefix + "*", "  ! Content-Security-Policy", ...(group.frameAncestors?.length ? ["  ! X-Frame-Options"] : []), "  Content-Security-Policy: " + policy].join("\n"));
   }
 
   if (blocks.length > HEADERS_RULE_LIMIT) {
@@ -275,6 +301,33 @@ export function generateHeadersFile(outDir: string, options: SecurityHeadersOpti
     }
   }
   return content;
+}
+
+/** Move executable bootstrap/style blocks to content-addressed assets without changing order. */
+export function externalizeInlineAssets(outDir: string, prefixes: string[]): number {
+  const root = path.resolve(outDir);
+  const assets = path.join(root, "_inline");
+  let count = 0;
+  const save = (body: string, extension: string) => {
+    const digest = crypto.createHash("sha256").update(body).digest("hex");
+    fs.mkdirSync(assets, {recursive: true});
+    fs.writeFileSync(path.join(assets, digest + extension), body);
+    count++;
+    return "/_inline/" + digest + extension;
+  };
+  for (const file of walk(root).filter(file => file.endsWith(".html") && prefixes.some(prefix => routeFor(file).startsWith(prefix)))) {
+    const target = path.join(root, file);
+    const original = fs.readFileSync(target, "utf8");
+    const updated = original.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (all, attributes: string, body: string) => {
+      if (attr(attributes, "src") !== null || !isExecutable(attr(attributes, "type"))) return all;
+      return `<script${attributes} src="${save(body, ".js")}"></script>`;
+    }).replace(/<style\b([^>]*)>([\s\S]*?)<\/style>/gi, (_all, attributes: string, body: string) => {
+      const media = attr(attributes, "media");
+      return `<link rel="stylesheet" href="${save(body, ".css")}"${media ? ` media="${media}"` : ""}>`;
+    });
+    if (updated !== original) fs.writeFileSync(target, updated);
+  }
+  return count;
 }
 
 export function writeHeadersFile(outDir: string, options: SecurityHeadersOptions = {}): string {
