@@ -37,19 +37,24 @@ export async function runFastGate(opts: {
   spec: SiteSpec;
   projectRoot: string;
   outDir?: string;
+  cmsPages?: { slug: string; title: string; description?: string }[];
+  browserChannel?: "chrome";
 }): Promise<FastGateResult> {
   const outDir = opts.outDir ?? path.join(opts.projectRoot, "out");
   const server = await serveStatic(outDir);
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(opts.browserChannel ? {channel:opts.browserChannel} : {});
   const context = await browser.newContext();
   const findings: CheckFinding[] = [];
 
   try {
-    for (const [pageIndex, pageSpec] of opts.spec.pages.entries()) {
+    const pages = [...opts.spec.pages, ...(opts.cmsPages ?? []).map(p => ({...p, sections:[]}))];
+    for (const [pageIndex, pageSpec] of pages.entries()) {
       const url = `${server.url}${pageSpec.slug === "/" ? "/" : pageSpec.slug}`;
       const page = await context.newPage();
       try {
-        const rawHtml = await (await fetch(url)).text();
+        const response = await fetch(url);
+        if (!response.ok) findings.push({severity:"blocker",check:"route-response",message:`Generated route returned HTTP ${response.status}.`,url});
+        const rawHtml = await response.text();
         await page.goto(url, { waitUntil: "load" });
         // Checks 1, 2 and 5 all read rendered text; a count-up caught mid-flight makes
         // check 1 report a hydration diff that is really an animation.
@@ -62,7 +67,7 @@ export async function runFastGate(opts: {
             rawHtml,
             spec: opts.spec,
             pageSpec,
-            pageIndex,
+            pageIndex: pageIndex < opts.spec.pages.length ? pageIndex : undefined,
           })),
         );
       } finally {

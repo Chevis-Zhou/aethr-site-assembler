@@ -1,5 +1,9 @@
 # aethr-base-template — state history
 
+**2026-09-30 — `_headers` generator: client static exports now grade A+ on Mozilla HTTP Observatory (was D/30).** `src/lib/deploy/security-headers.ts` writes `out/_headers` after the build (HSTS, nosniff, X-Frame-Options, Referrer-Policy, COOP, and a per-page CSP: `default-src 'none'`, script-src `'self'` + the sha256 of each page's inline scripts — no `'unsafe-inline'`). `staging()` in `deploy.ts` calls it before the manifest. Verified on a throwaway Worker: A+ / 135, 12/12 tests, exactly one CSP header on every route; page hydrates under the CSP. Cloudflare quirks measured, not assumed: multiple CSP headers AND, so page rules detach the inherited one (`! Content-Security-Policy`) — except the root `/`, where detach did not work and the fallback is `/:seg` + `/:seg/*` instead of `/*`; 100 rules / 2,000 chars per line are hard-checked. Turnstile and Google Fonts origins are auto-detected. 13 unit tests. Not yet exercised on a real client site's staging deploy (Turnstile branch untested live). Committed here; the tasteled wiring is not (it sits inside tasteled's uncommitted cf-deploy.sh refactor).
+
+**Next:** run one real client staging with it; then wire tasteled (done: `pnpm security-headers` in its deploy) and the portal's `security-headers` goal metric.
+
 Older "Where we left off" entries from [`STATE.md`](../STATE.md), newest first. A historical record: entries describe the code as it was on their date, not as it is now — read the code for current behavior.
 
 ## Where we left off (archived entries)

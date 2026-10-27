@@ -1,0 +1,11 @@
+{
+  "base": "https://portal.aethrdesign.com/edit-layer/0.2.0/",
+  "files": {
+    "cms/contract.mjs": "1da4f78254bda08f57423976c89113106cf4167bbefbf17948b7d0ff6b607813",
+    "cms/contract.d.mts": "adbb4028b214895fcbabb621ad03fd65eb2e4f001df687cc2130564ed314bac5",
+    "cms/view-model.mjs": "e6c8e04ff45bd50cdb55838c1e90b803a0547d8bae7ad8e12aa9830f0abb22f1",
+    "cms/view-model.d.mts": "45b56e03d0c1bd166d74ac7464735ed9d1010768a2ee0d570ca24bdc8c4a38b9",
+    "native-runtime.mjs": "f90ceb244ef9015722f6464e8bf9b6412dcadb682bf1379494bf8cf23a12e52c",
+    "native-runtime.d.mts": "b66717ef9191d40855255e513872a36904b38d0383d394b12c2c107ff1cbf7a2"
+  }
+}

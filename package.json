@@ -3,12 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "node scripts/sync-edit-layer.mjs && next dev",
+    "build": "node scripts/sync-edit-layer.mjs && next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test \"src/**/*.test.ts\" \"src/**/__tests__/**/*.test.ts\"",
-    "test:watch": "tsx --test --watch \"src/**/*.test.ts\" \"src/**/__tests__/**/*.test.ts\""
+    "test": "node scripts/sync-edit-layer.mjs && tsx --test \"src/**/*.test.ts\" \"src/**/__tests__/**/*.test.ts\"",
+    "test:watch": "node scripts/sync-edit-layer.mjs && tsx --test --watch \"src/**/*.test.ts\" \"src/**/__tests__/**/*.test.ts\""
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

@@ -6,6 +6,7 @@ import { z } from "zod/v4";
 import { hashArtifact, unpackArtifact } from "../src/lib/deploy/artifact-pack";
 import { currentDeployment, listWorkerDomains } from "../src/lib/deploy/cloudflare-api";
 import { assertRoutesAttached } from "../src/lib/deploy/deploy";
+import { uploadAndSwitchVersion } from "../src/lib/deploy/fenced-version";
 import {
   generateWranglerConfig,
   hostnamesToPreserve,
@@ -26,13 +27,14 @@ import {
  *
  *   verify checkout = pinned commit → download artifact (fence-checked) → verify hash
  *     → unpack into an empty out/ → compare Cloudflare's live deployment with the recorded one
- *     → write wrangler.jsonc from the portal's target → re-check fence → wrangler deploy
+ *     → verify existing routes → write wrangler.jsonc → re-check fence → upload version
+ *     → re-check fence → deploy that exact version at 100% traffic
  *     → assert routes → commit (fence-conditional)
  *
  * What is and is not fenced, stated plainly: Cloudflare has no deploy precondition, so the upload
- * itself is not conditional. Exclusivity comes from (1) this being the only holder of the token,
+ * and traffic switch are not conditional. Exclusivity comes from (1) this being the only holder of the token,
  * (2) the workflow's per-site concurrency group, which serializes switches, and (3) the fence,
- * re-checked right before the upload and enforced on commit, so a run that lost its fence can
+ * re-checked right before the traffic switch and enforced on commit, so a run that lost its fence can
  * never record its deployment and the next switch notices drift. Deterministic refusals call
  * `abort`; a transient failure exits without one, leaving the job re-dispatchable.
  */
@@ -140,14 +142,30 @@ async function main(): Promise<void> {
       compatibilityDate: COMPATIBILITY_DATE,
       extraHostnames,
     } as const;
+    // This path updates an existing Worker only; route attachment belongs to initial provisioning.
+    await assertRoutesAttached(begin.slug, routesFor(target), dryRun);
     fs.writeFileSync(path.join(PROJECT_ROOT, "wrangler.jsonc"), generateWranglerConfig(target), "utf-8");
 
     await call({ action: "check", jobId: begin.jobId, fence: begin.fence });
     if (dryRun) {
-      console.log("  [dry-run] would run: npx wrangler deploy");
+      console.log("  [dry-run] would upload a version, re-check the fence, and deploy that exact version at 100%");
       return;
     }
-    execFileSync("npx", ["wrangler", "deploy"], { cwd: PROJECT_ROOT, stdio: "inherit" });
+    await uploadAndSwitchVersion({
+      worker,
+      message: `Fenced publish ${begin.jobId} generation ${begin.generation}`,
+      checkFence: async () => { await call({ action: "check", jobId: begin.jobId, fence: begin.fence }); },
+      run: (args, capture) => {
+        const stdout = execFileSync("npx", ["wrangler", ...args], {
+          cwd: PROJECT_ROOT,
+          stdio: capture ? ["ignore", "pipe", "inherit"] : "inherit",
+          maxBuffer: 16_000_000,
+        });
+        const text = stdout?.toString() ?? "";
+        if (capture) process.stdout.write(text);
+        return text;
+      },
+    });
 
     const deployed = await currentDeployment(worker, false);
     if (!deployed || deployed === live) throw new Error("wrangler exited 0 but Cloudflare shows no new deployment");

@@ -1,4 +1,5 @@
-import { attr, scan, type OpenNode } from "./html-scan";
+import { readDeclarations, type Declaration } from "./shared/declarations.mjs";
+import { parseBundle, assertBundleContent } from "./shared/bundle.mjs";
 import { getPath } from "./annotation-template";
 import {
   CHANGE_PRICE_CENTS,
@@ -34,173 +35,29 @@ import {
 
 export const ANNOTATION_VERSION = 1;
 
-type AnnotationType = "text" | "richtext" | "image" | "link" | "list" | "internal";
-
-interface FieldSpec {
-  path: string;
-  type: AnnotationType;
-  label?: string;
-  group?: string;
-  max?: number;
-  min?: number;
-  multiline?: boolean;
-  altRequired?: boolean;
+type AnnotationType = Declaration["type"];
+type FieldSpec = Omit<Declaration, "schemes" | "fields"> & {
   schemes?: string[];
-  minItems?: number;
-  maxItems?: number;
-  /** Manifest-declared per-item fields — the only way to constrain a list's contents. */
   fields?: Record<string, FieldSpec>;
-}
-
-interface ManifestEntry {
-  type?: AnnotationType;
-  label?: string;
-  group?: string;
-  max?: number;
-  min?: number;
-  multiline?: boolean;
-  altRequired?: boolean;
-  schemes?: string[] | string;
-  minItems?: number;
-  maxItems?: number;
-  fields?: Record<string, ManifestEntry>;
-}
-
+};
 export class AnnotationError extends Error {}
-
-/** The default `link` allowlist — `SPEC.md` §5. Never `http`, never `javascript:`. */
 const DEFAULT_SCHEMES = ["https", "mailto", "tel", "anchor"];
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Reading the declaration
  * ──────────────────────────────────────────────────────────────────────────── */
 
-function intAttr(node: OpenNode, name: string): number | undefined {
-  const raw = attr(node, name);
-  if (raw === undefined) return undefined;
-  const value = Number.parseInt(raw, 10);
-  if (!Number.isInteger(value) || value <= 0) {
-    throw new AnnotationError(`${name}="${raw}" is not a positive integer`);
-  }
-  return value;
-}
-
-/**
- * Every field the markup and the manifest between them declare, keyed by path.
- *
- * A path may be annotated on several elements (`contact.email` renders in the contact block
- * and again in the footer) — they are one field with several renderings, so the entries are
- * merged. `validate.mjs` already fails the *build* on two annotations that disagree, so a
- * conflict cannot reach here from a deployed site; merging rather than re-checking keeps
- * one validator instead of two that can drift.
- */
 export function readAnnotations(templateHtml: string): Map<string, FieldSpec> {
-  const nodes = scan(templateHtml);
-  const specs = new Map<string, FieldSpec>();
-
-  const htmlTag = nodes.find((node) => node.kind === "open" && node.name === "html") as
-    | OpenNode
-    | undefined;
-  const declared = htmlTag ? attr(htmlTag, "data-ae-v") : undefined;
-  const version = declared === undefined ? undefined : Number.parseInt(declared, 10);
-  if (!Number.isInteger(version)) {
-    throw new AnnotationError(
-      "This page carries no `data-ae-v` — it has not been annotated for the editor.",
-    );
-  }
-  if ((version as number) > ANNOTATION_VERSION) {
-    // SPEC §2: refuse, never guess. Editing a page whose constraints this reader cannot
-    // see is exactly the failure the version marker exists to prevent.
-    throw new AnnotationError(
-      `This site needs a newer editor (page is v${version}, this reader is v${ANNOTATION_VERSION}).`,
-    );
-  }
-
-  for (let i = 0; i < nodes.length; i++) {
-    const node = nodes[i];
-    if (node.kind !== "open") continue;
-
-    // The manifest — fields with no element to click (SPEC §6).
-    if (node.name === "script" && attr(node, "data-ae-manifest") !== undefined) {
-      const body = nodes[i + 1];
-      if (body?.kind !== "raw") continue;
-      mergeManifest(specs, body.raw);
-      continue;
-    }
-
-    const path = attr(node, "data-ae");
-    if (path === undefined) continue;
-
-    const type = attr(node, "data-ae-type") as AnnotationType | undefined;
-    if (!type) throw new AnnotationError(`data-ae="${path}" has no data-ae-type`);
-
-    const schemes = attr(node, "data-ae-schemes");
-    merge(specs, {
-      path,
-      type,
-      max: intAttr(node, "data-ae-max"),
-      min: intAttr(node, "data-ae-min"),
-      multiline: attr(node, "data-ae-multiline") === "true",
-      altRequired: attr(node, "data-ae-alt-required") === "true",
-      schemes: schemes ? schemes.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
-      minItems: intAttr(node, "data-ae-min-items"),
-      maxItems: intAttr(node, "data-ae-max-items"),
-    });
-  }
-
-  return specs;
-}
-
-function merge(specs: Map<string, FieldSpec>, incoming: FieldSpec): void {
-  const existing = specs.get(incoming.path);
-  if (!existing) {
-    specs.set(incoming.path, incoming);
-    return;
-  }
-  for (const [key, value] of Object.entries(incoming)) {
-    if (value === undefined || value === false) continue;
-    (existing as unknown as Record<string, unknown>)[key] ??= value;
-  }
-}
-
-function mergeManifest(specs: Map<string, FieldSpec>, json: string): void {
-  let parsed: { v?: number; fields?: Record<string, ManifestEntry> };
   try {
-    parsed = JSON.parse(json) as typeof parsed;
-  } catch (err) {
-    throw new AnnotationError(`The page's field manifest is not valid JSON — ${(err as Error).message}`);
+    const normalize = (spec: Declaration): FieldSpec => ({
+      ...spec,
+      schemes: typeof spec.schemes === "string" ? spec.schemes.split(",").map(value => value.trim()) : spec.schemes,
+      fields: spec.fields ? Object.fromEntries(Object.entries(spec.fields).map(([key, value]) => [key, normalize(value)])) : undefined,
+    });
+    return new Map([...readDeclarations(templateHtml)].map(([path, spec]) => [path, normalize(spec)]));
+  } catch (error) {
+    throw new AnnotationError((error as Error).message);
   }
-  for (const [path, entry] of Object.entries(parsed.fields ?? {})) {
-    // The manifest is the more specific declaration — it is where labels, groups and
-    // per-item constraints live — so it wins over an inline attribute rather than
-    // deferring to it.
-    specs.set(path, { ...specs.get(path), ...fromManifest(path, entry) });
-  }
-}
-
-function fromManifest(path: string, entry: ManifestEntry): FieldSpec {
-  const schemes =
-    typeof entry.schemes === "string"
-      ? entry.schemes.split(",").map((s) => s.trim())
-      : entry.schemes;
-  return {
-    path,
-    type: entry.type ?? "text",
-    label: entry.label,
-    group: entry.group,
-    max: entry.max,
-    min: entry.min,
-    multiline: entry.multiline,
-    altRequired: entry.altRequired,
-    schemes,
-    minItems: entry.minItems,
-    maxItems: entry.maxItems,
-    fields: entry.fields
-      ? Object.fromEntries(
-          Object.entries(entry.fields).map(([key, value]) => [key, fromManifest(key, value)]),
-        )
-      : undefined,
-  };
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -258,7 +115,7 @@ interface Draft {
   lists: InventoryList[];
 }
 
-export function buildAnnotatedInventory(
+function buildPageInventory(
   templateHtml: string,
   content: unknown,
   slug: string,
@@ -382,6 +239,28 @@ export function buildAnnotatedInventory(
       },
     ],
     locked,
+  };
+}
+
+/** Route-aware inventory; a legacy template stays the original single page. */
+export function buildAnnotatedInventory(templateHtml: string, content: unknown, slug: string): FieldInventory {
+  const bundle = parseBundle(templateHtml);
+  assertBundleContent(templateHtml, content);
+  const inventories = bundle.pages.map(page => buildPageInventory(page.html, content, slug));
+  if (bundle.pages.length === 1 && bundle.mode === "html" && !templateHtml.trimStart().startsWith("{")) return inventories[0];
+  const site = { ...inventories[0].site, fields: [] as InventoryField[], lists: [] as InventoryList[] };
+  const fields = new Set<string>(), lists = new Set<string>();
+  for (const inventory of inventories) {
+    for (const field of inventory.site.fields) if (!fields.has(field.id)) { site.fields.push(field); fields.add(field.id); }
+    for (const list of inventory.site.lists) if (!lists.has(list.id)) { site.lists.push(list); lists.add(list.id); }
+  }
+  return {
+    ...inventories[0], site,
+    pages: inventories.map((inventory, index) => ({
+      ...inventory.pages[0], id: bundle.pages[index].id, slug: bundle.pages[index].slug,
+      label: bundle.pages[index].label,
+      groups: inventory.pages[0].groups.map(group => ({...group, id: `${bundle.pages[index].id}:${group.id}`})),
+    })),
   };
 }
 

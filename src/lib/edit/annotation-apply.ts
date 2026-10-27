@@ -1,7 +1,8 @@
 import type { EditOp, ApplyFailure } from "./apply";
 import type { FieldInventory, InventoryField, InventoryList } from "./inventory";
 import { annotatedWritePaths, buildAnnotatedInventory } from "./annotation-adapter";
-import { getPath, render, setPath, TemplateError } from "./annotation-template";
+import { getPath, setPath, TemplateError } from "./annotation-template";
+import { assertBundleContent } from "./shared/bundle.mjs";
 import { richTextToPlainText, sanitizeRichText } from "../rich-text";
 
 /**
@@ -176,7 +177,7 @@ export function applyAnnotatedEdit(
 
   // The re-parse. A page that no longer renders is refused before it is stored.
   try {
-    render(templateHtml, next);
+    assertBundleContent(templateHtml, next);
   } catch (err) {
     const message = err instanceof TemplateError ? err.message : String(err);
     return fail("invalid", edit.path, message);

@@ -59,4 +59,6 @@ export type { ApplyFailure, ApplyResult, EditOp } from "./apply";
 /* Reader #2 — the annotation manifest, for hand-built sites. */
 export { buildAnnotatedInventory } from "./annotation-adapter";
 export { TemplateError, render } from "./annotation-template";
+/* Preview dispatch consumes this same shared descriptor that validates writes. */
+export { parseBundle, pageTemplate } from "./shared/bundle.mjs";
 export { applyAnnotatedEdits } from "./annotation-apply";

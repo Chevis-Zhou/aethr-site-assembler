@@ -104,6 +104,74 @@ describe("routeFor", () => {
 });
 
 describe("generateHeadersFile", () => {
+  it("opts source-pinned HTML into no-transform without changing CSP or asset caching", () => {
+    const dir = site({"index.html":"<script>root()</script>","blog.html":"<script>list()</script>","blog/entry.html":"<script>detail()</script>","cms-preview.html":"<script>preview()</script>","404.html":"<script>missing()</script>","_next/static/app.js":"app()","cms-assets/image.webp":"bytes","blog.txt":"rsc"});
+    const options = {previewFrames:[{route:"/cms-preview",editorOrigin:"https://portal.example"}]};
+    const normal = generateHeadersFile(dir, options);
+    assert.equal(normal, generateHeadersFile(dir,{...options,preserveHtml:false}));
+    assert.ok(!normal.includes("Cache-Control"));
+    const preserved = generateHeadersFile(dir,{...options,preserveHtml:true});
+    const rules = (text:string) => Object.fromEntries(text.trim().split("\n\n").map(block=>[block.split("\n")[0],block.split("\n").slice(1)]));
+    const before=rules(normal),after=rules(preserved);
+    const cache="  Cache-Control: public, max-age=0, must-revalidate, no-transform";
+    for(const route of ["/","/blog","/blog/entry","/cms-preview"]){
+      assert.ok(after[route].includes(cache),route);
+      assert.deepEqual(after[route].filter(line=>!line.includes("Cache-Control")),before[route],`CSP changed at ${route}`);
+      assert.equal(after[route].filter(line=>line===cache).length,1);
+    }
+    assert.ok(after["/:seg"].some(line=>line.includes(hash("missing()"))));
+    assert.ok(after["/404"].includes(cache));
+    assert.ok(after["/404"].some(line=>line.includes(hash("missing()"))));
+    for(const route of ["/_next/static/app.js","/cms-assets/image.webp","/blog.txt"])
+      assert.equal(after[route],undefined,route);
+    for(const route of ["/:seg","/:seg/*"]){
+      assert.deepEqual(after[route],before[route]);
+      assert.ok(!after[route].some(line=>line.includes("Cache-Control")));
+    }
+    assert.ok(!after["/*"].some(line=>line.includes("Cache-Control")));
+    assert.ok(preserved.split("\n").every(line=>line.length<=2000));
+    assert.ok(Object.keys(after).length<=HEADERS_RULE_LIMIT);
+  });
+
+  it("does not spend header rules on unchanged asset caching", () => {
+    const files:Record<string,string>={"index.html":"<p/>","404.html":"<p/>"};
+    for(let n=0;n<HEADERS_RULE_LIMIT;n++)files[`assets/${n}.js`]="asset";
+    const dir=site(files);
+    assert.doesNotThrow(()=>generateHeadersFile(dir));
+    assert.equal(generateHeadersFile(dir,{preserveHtml:true}).trim().split("\n\n").length,5);
+  });
+
+  it("allows only the recorded editor to frame the exact preview shell", () => {
+    const dir = site({"index.html":"<p>home</p>","cms-preview.html":"<script>preview()</script>","404.html":"<p>missing</p>"});
+    const rules = Object.fromEntries(generateHeadersFile(dir,{previewFrames:[{route:"/cms-preview",editorOrigin:"https://portal.example"}]}).trim().split("\n\n").map(rule=>[rule.split("\n")[0],rule]));
+    assert.match(rules["/*"], /X-Frame-Options: DENY/);
+    assert.match(rules["/cms-preview"], /! X-Frame-Options/);
+    assert.match(rules["/cms-preview"], /frame-ancestors https:\/\/portal\.example(?:;|$)/);
+    assert.match(rules["/cms-preview"], /img-src 'self' data: blob: https:/);
+    for (const route of ["/", "/:seg", "/:seg/*"]) {
+      assert.match(rules[route], /frame-ancestors 'none'/);
+      assert.ok(!rules[route].includes("! X-Frame-Options"));
+    }
+  });
+
+  it("refuses framing exceptions for production, nonexistent, duplicate or nonexact origins", () => {
+    const dir = site({"index.html":"<p/>","about.html":"<p/>","cms-preview/index.html":"<p/>"});
+    const valid = {route:"/cms-preview/",editorOrigin:"http://localhost:3000"};
+    assert.doesNotThrow(()=>generateHeadersFile(dir,{previewFrames:[valid]}));
+    for (const preview of [{...valid,route:"/about"},{...valid,route:"/cms-preview"},{...valid,editorOrigin:"https://portal.example/path"},{...valid,editorOrigin:"http://portal.example"},{...valid,editorOrigin:"https://portal.example; frame-ancestors *"}])
+      assert.throws(()=>generateHeadersFile(dir,{previewFrames:[preview]}));
+    assert.throws(()=>generateHeadersFile(dir,{previewFrames:[valid,valid]}),/unique exported/);
+  });
+
+  it("supports an exact exported preview under a registered renderer prefix", () => {
+    const dir = site({"html-proof/cms-preview/index.html":"<p/>","html-proof/index.html":"<p/>"});
+    const headers = generateHeadersFile(dir,{previewFrames:[{route:"/html-proof/cms-preview/",editorOrigin:"https://portal.example"}]});
+    const blocks = Object.fromEntries(headers.trim().split("\n\n").map(rule=>[rule.split("\n")[0],rule]));
+    assert.match(blocks["/html-proof/cms-preview/"], /frame-ancestors https:\/\/portal\.example/);
+    assert.match(blocks["/html-proof/"], /frame-ancestors 'none'/);
+    assert.throws(()=>generateHeadersFile(dir,{previewFrames:[{route:"/html-proof/*/cms-preview/",editorOrigin:"https://portal.example"}]}));
+  });
+
   it("emits static headers, a 404-CSP fallback and one rule per page, 404 excluded", () => {
     const dir = site({
       "index.html": "<script>home()</script>",
@@ -142,11 +210,15 @@ describe("generateHeadersFile", () => {
   it("fails loudly past Cloudflare's 100-rule cap", () => {
     const files: Record<string, string> = {};
     for (let i = 0; i < HEADERS_RULE_LIMIT; i++) files[`p${i}.html`] = "<p/>";
-    assert.throws(() => generateHeadersFile(site(files)), /_headers rules/);
+    const dir=site(files);
+    assert.throws(() => generateHeadersFile(dir), /_headers rules/);
+    assert.throws(() => generateHeadersFile(dir,{preserveHtml:true}), /_headers rules/);
   });
 
   it("fails loudly on a line over 2,000 characters", () => {
     const scripts = Array.from({ length: 45 }, (_, i) => `<script>s${i}()</script>`).join("");
-    assert.throws(() => generateHeadersFile(site({ "index.html": scripts })), /2000/);
+    const dir=site({ "index.html": scripts });
+    assert.throws(() => generateHeadersFile(dir), /2000/);
+    assert.throws(() => generateHeadersFile(dir,{preserveHtml:true}), /2000/);
   });
 });

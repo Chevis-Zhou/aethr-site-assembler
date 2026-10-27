@@ -53,3 +53,6 @@ next-env.d.ts
 # Private analysis layer (prompt, exemplars, generation) — its own private repo,
 # Chevis-Zhou/aethr-analysis, nested here. This repo is public. Ticket 032.
 src/lib/analysis/
+
+# Generated from the shared annotation package; never hand-edit this copy.
+/src/lib/edit/shared/

@@ -33,19 +33,18 @@ export async function checkAssetManifest(outDir: string, projectRoot: string): P
   const findings: CheckFinding[] = [];
 
   for (const file of rasterFiles) {
-    // The static export copies `public/` to `out/` with identical relative paths, so the
-    // manifest key (recorded relative to the project root, over `public/`) is the same
-    // string as the file's path relative to `out/`.
+    // Next copies public/<path> to out/<path>; optimizer keys are project-relative.
     const relFromOut = path.relative(outDir, file);
+    const sourceKey = path.join("public", relFromOut);
     const hash = await hashFile(file);
 
-    if (manifest[relFromOut] !== hash) {
+    if (manifest[sourceKey] !== hash) {
       findings.push({
         severity: "blocker",
         check: "asset-manifest-coverage",
         message: `Raster asset "${relFromOut}" is not covered by the optimization manifest — the optimizer may not have run on it.`,
         expected: "hash present in .image-manifest.json",
-        actual: manifest[relFromOut] ? "hash mismatch" : "no manifest entry",
+        actual: manifest[sourceKey] ? "hash mismatch" : "no manifest entry",
       });
     }
   }
