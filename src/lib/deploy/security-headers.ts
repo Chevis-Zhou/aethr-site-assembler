@@ -53,7 +53,7 @@ export interface SecurityHeadersOptions {
   /** Only these exported preview shells may be embedded by their registered editor. */
   previewFrames?: Array<{ route: string; editorOrigin: string }>;
   /** Explicit static route families, after their inline assets are externalized. */
-  groups?: Array<{ prefix: string; frameAncestors?: string[]; frameOrigins?: string[]; styleOrigins?: string[]; fontOrigins?: string[]; inlineStyles?: boolean }>;
+  groups?: Array<{ prefix: string; frameAncestors?: string[]; frameOrigins?: string[]; styleOrigins?: string[]; fontOrigins?: string[]; inlineStyles?: boolean; blobWorkers?: boolean; wasmEvaluation?: boolean }>;
 }
 
 export interface PageAssets {
@@ -165,10 +165,12 @@ export interface PolicyInput {
   frameAncestors?: string[];
   fontOrigins?: string[];
   inlineStyles?: boolean;
+  blobWorkers?: boolean;
+  wasmEvaluation?: boolean;
 }
 
-export function buildPolicy({ assets, turnstile, connectOrigins, frameOrigins, frameAncestors = [], fontOrigins = [], inlineStyles = false }: PolicyInput): string {
-  const scriptSrc = ["'self'", ...assets.scriptHashes, ...assets.scriptOrigins, CF_ANALYTICS_SCRIPT];
+export function buildPolicy({ assets, turnstile, connectOrigins, frameOrigins, frameAncestors = [], fontOrigins = [], inlineStyles = false, blobWorkers = false, wasmEvaluation = false }: PolicyInput): string {
+  const scriptSrc = ["'self'", ...(wasmEvaluation ? ["'wasm-unsafe-eval'"] : []), ...assets.scriptHashes, ...assets.scriptOrigins, CF_ANALYTICS_SCRIPT];
   const styleSrc = ["'self'", ...assets.styleHashes, ...assets.styleOrigins, ...(inlineStyles ? ["'unsafe-inline'"] : [])];
   const fontSrc = ["'self'", "data:", ...fontOrigins];
   const connectSrc = ["'self'", ...connectOrigins, CF_ANALYTICS_BEACON];
@@ -193,6 +195,7 @@ export function buildPolicy({ assets, turnstile, connectOrigins, frameOrigins, f
     ["manifest-src", ["'self'"]],
     ["frame-src", frames.length ? unique(frames) : ["'none'"]],
     ["object-src", ["'none'"]],
+    ...(blobWorkers ? [["worker-src", ["'self'", "blob:"]] as [string, string[]]] : []),
     ["base-uri", ["'self'"]],
     ["form-action", ["'self'", ...connectOrigins]],
     ["frame-ancestors", frameAncestors.length ? unique(frameAncestors) : ["'none'"]],
@@ -284,7 +287,7 @@ export function generateHeadersFile(outDir: string, options: SecurityHeadersOpti
     const scans = members.map(file => scanHtml(fs.readFileSync(path.join(resolved, file), "utf-8")));
     if (scans.some(scan => scan.scriptHashes.length || scan.styleHashes.length)) throw new Error(`Externalize inline assets before grouping ${group.prefix}`);
     const assets: PageAssets = {scriptHashes: [], styleHashes: [], scriptOrigins: unique(scans.flatMap(scan => scan.scriptOrigins)), styleOrigins: unique([...scans.flatMap(scan => scan.styleOrigins), ...(group.styleOrigins ?? [])]), frameOrigins: unique(scans.flatMap(scan => scan.frameOrigins))};
-    const policy = buildPolicy({assets, turnstile, connectOrigins, frameOrigins: group.frameOrigins ?? frameOrigins, frameAncestors: group.frameAncestors, fontOrigins: group.fontOrigins, inlineStyles: group.inlineStyles});
+    const policy = buildPolicy({assets, turnstile, connectOrigins, frameOrigins: group.frameOrigins ?? frameOrigins, frameAncestors: group.frameAncestors, fontOrigins: group.fontOrigins, inlineStyles: group.inlineStyles, blobWorkers: group.blobWorkers, wasmEvaluation: group.wasmEvaluation});
     blocks.push([group.prefix + "*", "  ! Content-Security-Policy", ...(group.frameAncestors?.length ? ["  ! X-Frame-Options"] : []), "  Content-Security-Policy: " + policy].join("\n"));
   }
 

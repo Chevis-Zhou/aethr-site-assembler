@@ -48,3 +48,18 @@ test("only an explicit preview family permits embedding and dynamic CSS", () => 
     assert.throws(() => generateHeadersFile(root, { groups: [{ prefix: "/template-demos/", frameAncestors: ["https://example.com/path"] }] }), /exact HTTPS/);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test("3D preview workers and WASM are scoped to the requested group", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "wasm-headers-"));
+  try {
+    fs.mkdirSync(path.join(root, "template-demos/demo"), { recursive: true });
+    fs.writeFileSync(path.join(root, "index.html"), "home");
+    fs.writeFileSync(path.join(root, "template-demos/demo/index.html"), "demo");
+    const headers = generateHeadersFile(root, { groups: [{ prefix: "/template-demos/", blobWorkers: true, wasmEvaluation: true }] });
+    const demo = headers.split("\n\n").find(block => block.startsWith("/template-demos/"))!;
+    assert.match(demo, /worker-src 'self' blob:/);
+    assert.match(demo, /script-src 'self' 'wasm-unsafe-eval'/);
+    assert.doesNotMatch(demo.match(/script-src [^;]+/)![0], /'unsafe-eval'|'unsafe-inline'/);
+    assert.doesNotMatch(headers.split("\n\n").find(block => block.startsWith("/\n"))!, /wasm-unsafe-eval|worker-src/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
