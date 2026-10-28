@@ -36,12 +36,13 @@ test("only an explicit preview family permits embedding and dynamic CSS", () => 
     fs.mkdirSync(path.join(root, "template-demos/demo"), { recursive: true });
     fs.writeFileSync(path.join(root, "index.html"), "home");
     fs.writeFileSync(path.join(root, "template-demos/demo/index.html"), '<script src="preview.js"></script>');
-    const headers = generateHeadersFile(root, { groups: [{ prefix: "/template-demos/", frameAncestors: ["'self'"], inlineStyles: true, styleOrigins: ["https://fonts.googleapis.com"] }] });
+    const headers = generateHeadersFile(root, { groups: [{ prefix: "/template-demos/", frameAncestors: ["'self'"], inlineStyles: true, styleOrigins: ["https://fonts.googleapis.com"], fontOrigins: ["https://cdn.fontshare.com"] }] });
     const demo = headers.split("\n\n").find(block => block.startsWith("/template-demos/"))!;
     assert.match(demo, /! X-Frame-Options/);
     assert.match(demo, /frame-ancestors 'self'/);
     assert.match(demo, /style-src 'self' https:\/\/fonts.googleapis.com 'unsafe-inline'/);
-    assert.match(demo, /font-src 'self' data: https:\/\/fonts.gstatic.com/);
+    assert.match(demo, /font-src [^;]*https:\/\/cdn.fontshare.com/);
+    assert.match(demo, /font-src [^;]*https:\/\/fonts.gstatic.com/);
     assert.doesNotMatch(demo.match(/script-src [^;]+/)![0], /unsafe-inline/);
     assert.throws(() => generateHeadersFile(root, { groups: [{ prefix: "/" }] }), /literal non-root/);
     assert.throws(() => generateHeadersFile(root, { groups: [{ prefix: "/template-demos/", frameAncestors: ["https://example.com/path"] }] }), /exact HTTPS/);
