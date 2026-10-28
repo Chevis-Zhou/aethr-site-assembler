@@ -63,3 +63,24 @@ test("3D preview workers and WASM are scoped to the requested group", () => {
     assert.doesNotMatch(headers.split("\n\n").find(block => block.startsWith("/\n"))!, /wasm-unsafe-eval|worker-src/);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test("React style elements survive script externalization when styles are disabled", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "hydration-headers-"));
+  try {
+    const dir = path.join(root, "template-demos/portfolio");
+    fs.mkdirSync(dir, { recursive: true });
+    const style = '<style data-selection-default="true">::selection { background: #bfdbfe; }</style>';
+    fs.writeFileSync(path.join(dir, "index.html"), `<head>${style}</head><body><script>first()</script>${style}<script>second()</script><script type="application/ld+json">{}</script></body>`);
+    assert.equal(externalizeInlineAssets(root, ["/template-demos/"], { styles: false }), 2);
+    const html = fs.readFileSync(path.join(dir, "index.html"), "utf8");
+    assert.equal(html.split(style).length - 1, 2);
+    assert.doesNotMatch(html, /<link/);
+    const scanned = scanHtml(html);
+    assert.deepEqual(scanned.scriptHashes, []);
+    assert.equal(scanned.styleHashes.length, 1);
+    const scripts = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => fs.readFileSync(path.join(root, m[1]), "utf8"));
+    assert.deepEqual(scripts, ["first()", "second()"]);
+    assert.match(html, /application\/ld\+json/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

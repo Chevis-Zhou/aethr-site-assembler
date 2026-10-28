@@ -308,7 +308,7 @@ export function generateHeadersFile(outDir: string, options: SecurityHeadersOpti
 }
 
 /** Move executable bootstrap/style blocks to content-addressed assets without changing order. */
-export function externalizeInlineAssets(outDir: string, prefixes: string[]): number {
+export function externalizeInlineAssets(outDir: string, prefixes: string[], options: { styles?: boolean } = {}): number {
   const root = path.resolve(outDir);
   const assets = path.join(root, "_inline");
   let count = 0;
@@ -325,7 +325,8 @@ export function externalizeInlineAssets(outDir: string, prefixes: string[]): num
     const updated = original.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (all, attributes: string, body: string) => {
       if (attr(attributes, "src") !== null || !isExecutable(attr(attributes, "type"))) return all;
       return `<script${attributes} src="${save(body, ".js")}"></script>`;
-    }).replace(/<style\b([^>]*)>([\s\S]*?)<\/style>/gi, (_all, attributes: string, body: string) => {
+    }).replace(/<style\b([^>]*)>([\s\S]*?)<\/style>/gi, (all, attributes: string, body: string) => {
+      if (options.styles === false) return all;
       const media = attr(attributes, "media");
       return `<link rel="stylesheet" href="${save(body, ".css")}"${media ? ` media="${media}"` : ""}>`;
     });

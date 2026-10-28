@@ -73,6 +73,8 @@ export interface BoundedBudget {
 
 export interface OptimizeOptions {
   manifestFile?: string;
+  /** Use installed lossless CLI tools for large unattended batches; GUI remains the default. */
+  losslessBackend?: "imageoptim" | "native";
   /** Process these files instead of walking `publicDir`. Non-raster paths are ignored. */
   files?: string[];
   /** Files to leave alone, on top of `raw/` capture directories. */
@@ -184,7 +186,7 @@ async function sleep(ms: number): Promise<void> {
  * failing a client's publish, because the *manifest* is what the asset check gates on and
  * sharp (stage 1) has already run by this point.
  */
-async function runLosslessLinux(files: string[]): Promise<void> {
+async function runLosslessLinux(files: string[], required = false): Promise<void> {
   const has = async (bin: string) => {
     try {
       await execFileAsync("which", [bin]);
@@ -194,6 +196,16 @@ async function runLosslessLinux(files: string[]): Promise<void> {
     }
   };
 
+  if (required) {
+    for (const [extensions, bin] of [[['.png'], 'oxipng'], [['.jpg', '.jpeg'], 'jpegtran'], [['.gif'], 'gifsicle']] as const) {
+      if (files.some(file => (extensions as readonly string[]).includes(path.extname(file).toLowerCase())) && !(await has(bin))) throw Error(`Required lossless tool unavailable: ${bin}`);
+    }
+  }
+  const gifs = files.filter(file => path.extname(file).toLowerCase() === '.gif');
+  if (gifs.length && await has('gifsicle')) {
+    for (const file of gifs) await execFileAsync('gifsicle', ['--careful', '-O3', '-b', file]);
+    console.log(`gifsicle: ${gifs.length} gif(s)`);
+  }
   const pngs = files.filter((f) => path.extname(f).toLowerCase() === ".png");
   const jpgs = files.filter((f) => [".jpg", ".jpeg"].includes(path.extname(f).toLowerCase()));
 
@@ -230,9 +242,9 @@ async function runLosslessLinux(files: string[]): Promise<void> {
  * goes stale the moment it lands (aethrdesign-web, 2026-10-07: a fixed 20-minute cap recorded
  * 300 files while ImageOptim still had 20 queued, so 11 entries were wrong on the next check).
  */
-async function runImageOptim(files: string[]): Promise<boolean> {
-  if (process.platform !== "darwin") {
-    await runLosslessLinux(files);
+async function runImageOptim(files: string[], backend: OptimizeOptions["losslessBackend"] = "imageoptim"): Promise<boolean> {
+  if (backend === "native" || process.platform !== "darwin") {
+    await runLosslessLinux(files, backend === "native");
     return true;
   }
   const targets: string[] = [];
@@ -395,7 +407,7 @@ export async function optimizeImages(
     if (await optimizeImage(file, { budget: budgetFor(file, options), projectRoot })) processed++;
   }
 
-  const settled = toProcess.length > 0 ? await runImageOptim(toProcess) : true;
+  const settled = toProcess.length > 0 ? await runImageOptim(toProcess, options.losslessBackend) : true;
 
   // Unsettled files stay out of the manifest, so the next run picks them up again.
   for (const f of settled ? toProcess : []) {
@@ -468,7 +480,7 @@ export async function seedManifest(projectRoot: string, publicDir: string, manif
 }
 
 // CLI: npx tsx src/lib/qa/image-pipeline/optimize-images.ts [--project-root <path>] [--public-dir <path>]
-//      [--manifest <file>] [--seed-manifest | --sharp-only] [file ...]
+//      [--manifest <file>] [--native-lossless] [--seed-manifest | --sharp-only] [file ...]
 // With no files it walks the public dir. `--sharp-only` runs stage 1 without touching the manifest.
 if (process.argv[1]?.replace(/\\/g, "/").includes("qa/image-pipeline/optimize-images")) {
   const args = process.argv.slice(2);
@@ -482,6 +494,7 @@ if (process.argv[1]?.replace(/\\/g, "/").includes("qa/image-pipeline/optimize-im
   const publicDir = path.resolve(flag("--public-dir", path.join(projectRoot, "public")));
   const options: OptimizeOptions = {
     manifestFile: flag("--manifest", DEFAULT_MANIFEST),
+    ...(args.includes("--native-lossless") ? { losslessBackend: "native" as const } : {}),
     ...(files.length ? { files } : {}),
   };
 
