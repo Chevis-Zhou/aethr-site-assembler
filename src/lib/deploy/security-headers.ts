@@ -311,7 +311,7 @@ export function generateHeadersFile(outDir: string, options: SecurityHeadersOpti
 }
 
 /** Move executable bootstrap/style blocks to content-addressed assets without changing order. */
-export function externalizeInlineAssets(outDir: string, prefixes: string[], options: { styles?: boolean } = {}): number {
+export function externalizeInlineAssets(outDir: string, prefixes: string[], options: { styles?: boolean; exactRoutes?: readonly string[] } = {}): number {
   const root = path.resolve(outDir);
   const assets = path.join(root, "_inline");
   let count = 0;
@@ -322,7 +322,11 @@ export function externalizeInlineAssets(outDir: string, prefixes: string[], opti
     count++;
     return "/_inline/" + digest + extension;
   };
-  for (const file of walk(root).filter(file => file.endsWith(".html") && prefixes.some(prefix => routeFor(file).startsWith(prefix)))) {
+  const exactRoutes = new Set(options.exactRoutes);
+  for (const file of walk(root)) {
+    if (!file.endsWith(".html")) continue;
+    const route = routeFor(file);
+    if (!exactRoutes.has(route) && !prefixes.some(prefix => route.startsWith(prefix))) continue;
     const target = path.join(root, file);
     const original = fs.readFileSync(target, "utf8");
     const updated = original.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (all, attributes: string, body: string) => {

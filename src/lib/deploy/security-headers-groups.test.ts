@@ -30,6 +30,20 @@ test("a large catalogue retains ordered bootstraps with a bounded strict CSP", (
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test("the catalogue root can be externalized without changing similarly named routes", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "catalogue-root-"));
+  try {
+    const inline = "<script>bootstrap()</script><style>p{color:red}</style>";
+    fs.writeFileSync(path.join(root, "template.html"), inline);
+    fs.writeFileSync(path.join(root, "template-library.html"), inline);
+    assert.equal(externalizeInlineAssets(root, ["/template/"], { exactRoutes: ["/template"] }), 2);
+    const html = fs.readFileSync(path.join(root, "template.html"), "utf8");
+    assert.deepEqual(scanHtml(html).scriptHashes, []);
+    assert.deepEqual(scanHtml(html).styleHashes, []);
+    assert.equal(fs.readFileSync(path.join(root, "template-library.html"), "utf8"), inline);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test("only an explicit preview family permits embedding and dynamic CSS", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "demo-headers-"));
   try {
