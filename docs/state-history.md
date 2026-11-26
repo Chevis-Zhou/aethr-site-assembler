@@ -394,7 +394,7 @@ All three answered, and each one moved the code.
 - **CLAUDE.md contamination: `--restricted` is the entire answer, and needs no help.** With it,
   none of the discoverable instruction files load from any cwd — including one under
   `Vault/Business/clients/`. Without it, that same cwd loads all five: `~/.claude/CLAUDE.md`,
-  `/Volumes/External SSD/CLAUDE.md`, `Vault/CLAUDE.md`, `Business/CLAUDE.md` and `MEMORY.md`.
+  `/Volumes/Main/CLAUDE.md`, `Vault/CLAUDE.md`, `Business/CLAUDE.md` and `MEMORY.md`.
   No scratch-directory gymnastics and no `--setting-sources ""` are required. The run directory
   is still a scratch dir, but for the *output contract*, not for contamination.
 - **`--json-schema` works only with `$schema` removed.** Zod v4 emits
@@ -576,7 +576,7 @@ Three syntax/stale-file fixes, no design decisions:
 
 1. **`src/lib/types.ts` — complete.** Already carried all fourteen section types and `SectionPropsByType` coverage guard (second pass).
 2. **`src/app/showcase/page.tsx` — complete.** Already renders all fourteen sections (second pass).
-3. **Artifact manifest write path moved to Vault.** `.deploy/` is gone; `manifestPath()` now writes to `/Volumes/External SSD/Vault/Business/clients/<slug>/approved-artifact.json`. Added `--vault-root` CLI flag (defaults to that path). `SPEC.md` updated; no API changes to callers outside this module. Verified: `tsc` clean, `eslint` clean, `pnpm build` completes, dry-run resolves path correctly.
+3. **Artifact manifest write path moved to Vault.** `.deploy/` is gone; `manifestPath()` now writes to `/Volumes/Main/Developer/Business/clients/<slug>/approved-artifact.json`. Added `--vault-root` CLI flag (defaults to that path). `SPEC.md` updated; no API changes to callers outside this module. Verified: `tsc` clean, `eslint` clean, `pnpm build` completes, dry-run resolves path correctly.
 
 ### Eleventh pass — the Maxematics replay (Phase 5). PASSED, after five defects it found.
 

@@ -121,7 +121,7 @@ npx tsx src/lib/deploy/deploy.ts rollback --slug meridian-partners
 ```
 
 Flags:
-- `--vault-root <path>` — path to the Vault root (defaults to `/Volumes/External SSD/Vault`).
+- `--vault-root <path>` — path to the Vault root (defaults to `/Volumes/Main/Developer`).
   The manifest is recorded to `<vault-root>/Business/clients/<slug>/approved-artifact.json`.
 - `--dry-run` — prints the generated `wrangler.jsonc` and every command without executing any
   of them.

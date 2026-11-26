@@ -109,7 +109,7 @@ export async function assertRoutesAttached(
 }
 
 function manifestPath(slug: string, vaultRoot?: string): string {
-  const root = vaultRoot ?? "/Volumes/External SSD/Vault";
+  const root = vaultRoot ?? "/Volumes/Main/Developer";
   return path.join(root, "Business/clients", slug, "approved-artifact.json");
 }
 
@@ -351,7 +351,7 @@ A re-stage of a client past DEPLOY keeps any production Custom Domains already a
 DEPLOY verifies the artifact still matches what was approved, then attaches the client's
 apex and www to the same deployment and re-reads /workers/domains to confirm they stuck.
 It does not rebuild.
---vault-root defaults to /Volumes/External SSD/Vault if omitted.
+--vault-root defaults to /Volumes/Main/Developer if omitted.
 `;
 
 async function main(): Promise<void> {

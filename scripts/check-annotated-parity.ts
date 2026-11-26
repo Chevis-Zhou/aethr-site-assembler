@@ -22,7 +22,7 @@ import { applyAnnotatedEdits } from "../src/lib/edit/annotation-apply";
  */
 
 const DEFAULT_DIR =
-  "/Volumes/External SSD/Vault/Business/clients/max-maxematics/MaxTutoring/mockup";
+  "/Volumes/Main/Developer/Business/clients/max-maxematics/MaxTutoring/mockup";
 
 function arg(name: string, fallback: string): string {
   const at = process.argv.indexOf(`--${name}`);

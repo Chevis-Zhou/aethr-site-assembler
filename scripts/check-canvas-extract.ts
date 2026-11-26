@@ -29,7 +29,7 @@ import type { FieldInventory, InventoryField } from "../src/lib/edit/inventory";
  */
 
 const DEFAULT_DIR =
-  "/Volumes/External SSD/Vault/Business/clients/max-maxematics/MaxTutoring/mockup";
+  "/Volumes/Main/Developer/Business/clients/max-maxematics/MaxTutoring/mockup";
 
 /** Fields whose rendered text is legitimately not their stored text. Keep this empty. */
 const EXPECTED_FALLBACKS: string[] = [];

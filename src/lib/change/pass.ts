@@ -79,7 +79,7 @@ export interface PassState {
  * The folder
  * ──────────────────────────────────────────────────────────────────────────── */
 
-export const DEFAULT_VAULT_ROOT = "/Volumes/External SSD/Vault";
+export const DEFAULT_VAULT_ROOT = "/Volumes/Main/Developer";
 
 export function clientDir(slug: string, vaultRoot = DEFAULT_VAULT_ROOT): string {
   return path.join(vaultRoot, "Business/clients", slug);

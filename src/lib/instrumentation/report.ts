@@ -93,7 +93,7 @@ export function buildReport(clientsDir: string): string {
 
 if (require.main === module) {
   const vaultRootIdx = process.argv.indexOf("--vault-root");
-  const vaultRoot = vaultRootIdx !== -1 ? process.argv[vaultRootIdx + 1] : "/Volumes/External SSD/Vault";
+  const vaultRoot = vaultRootIdx !== -1 ? process.argv[vaultRootIdx + 1] : "/Volumes/Main/Developer";
   const clientsDir = path.join(vaultRoot, "Business/clients");
   console.log(buildReport(clientsDir));
 }

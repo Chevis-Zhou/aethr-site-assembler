@@ -2,7 +2,7 @@
 
 Assembler and section library for Aethr Design's productized sites, plus the self-edit backend (`src/lib/edit/`) that `aethr-portal` mirrors at build time. Next.js, deployed per client through the shared publish workflow. Vocabulary: [CONTEXT.md](CONTEXT.md).
 
-Generic engineering rules live in `~/Developer/Standards/coding-standard.md`; this file holds only what is specific to this repo.
+Generic engineering rules live in `/Volumes/Main/Developer/System/Standards/coding-standard.md`; this file holds only what is specific to this repo.
 
 ## Map
 
